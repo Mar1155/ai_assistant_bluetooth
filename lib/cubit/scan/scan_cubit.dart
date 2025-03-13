@@ -2,146 +2,238 @@ import 'dart:async';
 import 'dart:developer';
 
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_state.dart';
+import 'package:ai_assistent_bluetooth/localization/string_localization.dart';
 import 'package:ai_assistent_bluetooth/utils/extra.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 class ScanCubit extends Cubit<ScanState> {
   StreamSubscription<List<ScanResult>>? _scanResultsSubscription;
+  Timer? _scanTimeoutTimer;
+  
+  // Costanti configurabili
+  static const String _deviceName = "ESP32_BLE";
+  static const Duration _scanTimeout = Duration(seconds: 10);
+  static const Duration _connectionTimeout = Duration(seconds: 8);
 
   ScanCubit() : super(ScanState()) {
     startScan();
   }
 
   Future<void> startScan() async {
-    emit(ScanState(isScanning: true, statusMessage: "Scanning..."));
+    // Annulla eventuali processi in corso
+    await _cancelExistingOperations();
+    
+    // Aggiorna lo stato per mostrare l'avvio della scansione
+    emit(ScanState(
+      isScanning: true, 
+      statusMessage: AppStrings.scanningForDevices
+    ));
+    await Future.delayed(Duration(seconds: 1));
 
-    // Cancel existing subscription
-    await _scanResultsSubscription?.cancel();
+    // Imposta un timer di timeout per la scansione
+    _setupScanTimeoutTimer();
 
-    // Set up scan results listener
+    // Configura il listener per i risultati della scansione
+    _setupScanResultsListener();
+
+    try {
+      await FlutterBluePlus.startScan(timeout: _scanTimeout);
+      
+      log("Scansione completata");
+      // Se arriviamo qui e nessun dispositivo è stato trovato, emettiamo lo stato appropriato
+      if (state.device == null && state.isScanning) {
+        emit(const ScanState(
+          isScanning: false,
+          isConnecting: false,
+          statusMessage: AppStrings.deviceNotFound,
+          isConnected: false,
+        ));
+      }
+    } catch (e) {
+      log("Errore durante l'avvio della scansione: $e");
+      emit(ScanState(
+        isScanning: false, 
+        statusMessage: "${AppStrings.scanError}: $e"
+      ));
+    }
+  }
+
+  void _setupScanTimeoutTimer() {
+    _scanTimeoutTimer = Timer(_scanTimeout, () {
+      if (state.isScanning) {
+        FlutterBluePlus.stopScan();
+        if (state.device == null) {
+          emit(const ScanState(
+            isScanning: false,
+            statusMessage: AppStrings.scanTimeoutMessage,
+            isConnected: false,
+          ));
+        }
+      }
+    });
+  }
+
+  void _setupScanResultsListener() {
     _scanResultsSubscription = FlutterBluePlus.scanResults.listen(
       (results) async {
-        log("${results.length} devices found");
-        for (final result in results) {
-          log(result.device.toString());
-          if (result.device.platformName == "ESP32_BLE") {
-            await FlutterBluePlus.stopScan();
-            emit(
-              ScanState(
-                isScanning: false,
-                device: result.device,
-                statusMessage: "Device found. Connecting...",
-              ),
-            );
-            try {
-              await result.device.connectAndUpdateStream();
-              emit(
-                ScanState(
-                  isScanning: false,
-                  device: result.device,
-                  isConnected: true,
-                  statusMessage: "Connected",
-                ),
-              );
-            } catch (e) {
-              log(e.toString());
-              emit(
-                ScanState(
-                  isScanning: false,
-                  device: result.device,
-                  isConnected: false,
-                  statusMessage: "Connection failed: $e",
-                ),
-              );
-            }
-            await _scanResultsSubscription?.cancel();
-            return;
-          }
+        log("${results.length} dispositivi trovati");
+        
+        // Filtra per trovare solo il dispositivo che ci interessa
+        final targetDevice = results.where((result) => 
+          result.device.platformName == _deviceName).firstOrNull;
+        
+        if (targetDevice != null) {
+          emit(ScanState(isConnecting: true, statusMessage: AppStrings.connectingToDevice));
+          await _connectToDevice(targetDevice);
         }
       },
       onError: (error) {
-        log(error.toString());
-        emit(ScanState(isScanning: false, statusMessage: "Scan error: $error"));
+        log("Errore durante la scansione: $error");
+        emit(ScanState(
+          isScanning: false, 
+          statusMessage: "${AppStrings.scanError}: $error"
+        ));
       },
     );
+  }
 
-    log("start scanning...");
-
+  Future<void> _connectToDevice(ScanResult result) async {
+    // Interrompi la scansione una volta trovato il dispositivo
+    await FlutterBluePlus.stopScan();
+    
+    // Aggiorna lo stato per mostrare il tentativo di connessione
+    emit(ScanState(
+      isScanning: false,
+      device: result.device,
+      statusMessage: AppStrings.connectingToDevice,
+    ));
+    
+    // Tenta la connessione con timeout
     try {
-      // Start the scan and WAIT for it to complete
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
-
-      // This will only execute AFTER the scan completes (5 seconds)
-      log("scan completed");
-
-      // If we get here and no device was found, emit the not found state
-      if (state.device == null) {
-        emit(
-          const ScanState(
-            isScanning: false,
-            statusMessage: "Device not found",
-            isConnected: false,
-          ),
-        );
-      }
+      // Configura un timeout per la connessione
+      bool connectionCompleted = false;
+      
+      // Avvia un timer per il timeout della connessione
+      Timer(
+        _connectionTimeout,
+        () {
+          if (!connectionCompleted) {
+            log("Timeout della connessione");
+            emit(ScanState(
+              isScanning: false,
+              device: result.device,
+              isConnected: false,
+              statusMessage: AppStrings.connectionTimeout,
+            ));
+          }
+        },
+      );
+      
+      // Tenta la connessione
+      await result.device.connectAndUpdateStream();
+      connectionCompleted = true;
+      
+      // Se la connessione ha successo, aggiorna lo stato
+      emit(ScanState(
+        isScanning: false,
+        device: result.device,
+        isConnected: true,
+        statusMessage: AppStrings.connectionSuccessful,
+      ));
     } catch (e) {
-      log(e.toString());
-      emit(ScanState(isScanning: false, statusMessage: "Start Scan Error: $e"));
+      log("Errore di connessione: $e");
+      
+      // Determina un messaggio di errore più user-friendly
+      String errorMessage = _getUserFriendlyErrorMessage(e);
+      
+      emit(ScanState(
+        isScanning: false,
+        device: result.device,
+        isConnected: false,
+        statusMessage: errorMessage,
+      ));
+    }
+    
+    // Cancella il subscription una volta completata la connessione
+    await _scanResultsSubscription?.cancel();
+    _scanResultsSubscription = null;
+  }
+  
+  String _getUserFriendlyErrorMessage(dynamic error) {
+    String errorString = error.toString().toLowerCase();
+    
+    if (errorString.contains("timeout")) {
+      return AppStrings.connectionTimeout;
+    } else if (errorString.contains("permission")) {
+      return AppStrings.bluetoothPermissionError;
+    } else if (errorString.contains("bluetooth") && errorString.contains("disabled")) {
+      return AppStrings.bluetoothDisabled;
+    } else {
+      return "${AppStrings.connectionFailed}: $error";
     }
   }
 
   Future<void> retry() async {
+    await _cancelExistingOperations();
     startScan();
   }
 
   Future<void> disconnectFromAllDevices() async {
     try {
-      // Ottieni tutti i dispositivi connessi
-      List<BluetoothDevice> connectedDevices =
-          await FlutterBluePlus.connectedDevices;
+      List<BluetoothDevice> connectedDevices = await FlutterBluePlus.connectedDevices;
 
       if (connectedDevices.isEmpty) {
-        emit(
-          ScanState(
-            isScanning: false,
-            isConnected: false,
-            statusMessage: "No connected devices",
-          ),
-        );
+        emit(ScanState(
+          isScanning: false,
+          isConnected: false,
+          statusMessage: AppStrings.noConnectedDevices,
+        ));
         return;
       }
 
-      // Disconnettiti da ogni dispositivo
       for (final device in connectedDevices) {
         try {
-          log("Disconnecting from ${device.platformName}...");
+          log("Disconnessione da ${device.platformName}...");
           await device.disconnect();
-          log("Disconnected from ${device.platformName}");
+          log("Disconnesso da ${device.platformName}");
         } catch (e) {
-          log("Error disconnecting from ${device.platformName}: $e");
+          log("Errore durante la disconnessione da ${device.platformName}: $e");
         }
       }
 
-      // Aggiorna lo stato
-      emit(
-        ScanState(
-          isScanning: false,
-          isConnected: false,
-          statusMessage: "Disconnected from all devices",
-        ),
-      );
+      emit(ScanState(
+        isScanning: false,
+        isConnected: false,
+        statusMessage: AppStrings.disconnectedFromDevices,
+      ));
     } catch (e) {
-      log("Error during disconnection: $e");
-      emit(
-        ScanState(isScanning: false, statusMessage: "Disconnection error: $e"),
-      );
+      log("Errore durante la disconnessione: $e");
+      emit(ScanState(
+        isScanning: false, 
+        statusMessage: "${AppStrings.disconnectionError}: $e"
+      ));
+    }
+  }
+  
+  Future<void> _cancelExistingOperations() async {
+    // Annulla eventuali timer attivi
+    _scanTimeoutTimer?.cancel();
+    _scanTimeoutTimer = null;
+    
+    // Annulla subscription attivi
+    await _scanResultsSubscription?.cancel();
+    _scanResultsSubscription = null;
+    
+    // Interrompi eventuali scansioni in corso
+    if (FlutterBluePlus.isScanningNow) {
+      await FlutterBluePlus.stopScan();
     }
   }
 
   @override
-  Future<void> close() {
-    _scanResultsSubscription?.cancel();
+  Future<void> close() async {
+    await _cancelExistingOperations();
     return super.close();
   }
 }
