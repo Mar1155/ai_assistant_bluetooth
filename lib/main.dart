@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:developer';
 
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_cubit.dart';
 import 'package:flutter/material.dart';
@@ -38,6 +39,7 @@ class _FlutterBlueAppState extends State<FlutterBlueApp> {
     super.initState();
     _adapterStateStateSubscription = FlutterBluePlus.adapterState.listen((state) {
       _adapterState = state;
+      log(state.toString());
       if (mounted) {
         setState(() {});
       }
