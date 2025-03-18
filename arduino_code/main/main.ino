@@ -1,120 +1,88 @@
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
+#include "BluetoothSerial.h"
+#include <ArduinoJson.h>
 
-#define SERVICE_UUID "0000FFE0-0000-1000-8000-00805F9B34FB"
-#define CHARACTERISTIC_UUID "0000FFE1-0000-1000-8000-00805F9B34FB"
+// Istanza per la comunicazione Bluetooth classica
+BluetoothSerial SerialBT;
+int counter = 0;
 
-BLECharacteristic *pCharacteristic;
-bool deviceConnected = false;
-
-class MyServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *pServer) override {
-    deviceConnected = true;
+// Callback per gestire eventi di connessione/disconnessione
+void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
+  if (event == ESP_SPP_SRV_OPEN_EVT) {
     Serial.println("Client connesso");
-  };
-
-  void onDisconnect(BLEServer *pServer) override {
-    deviceConnected = false;
+  } else if (event == ESP_SPP_CLOSE_EVT) {
     Serial.println("Client disconnesso");
-    // Riavvia l'advertising per rendere nuovamente visibile il dispositivo
-    BLEDevice::getAdvertising()->start();
-    Serial.println("Advertising riavviato");
   }
-};
-
-class MyCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) override {
-    String rxValue = pCharacteristic->getValue();
-    if (rxValue.length() > 0) {
-      Serial.print("Messaggio ricevuto: ");
-      Serial.println(rxValue);
-
-      // Invio dell'eco del messaggio ricevuto al client
-      pCharacteristic->setValue("{'message': 'ok'}");
-      pCharacteristic->notify();
-    }
-  }
-};
+}
 
 void setup() {
   Serial.begin(115200);
-
-  // Inizializza il dispositivo BLE con il nome "ESP32_BLE"
-  BLEDevice::init("ESP32_BLE");
-
-  // Crea il server BLE e definisci i callback di connessione/disconnessione
-  BLEServer *pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  // Crea il servizio BLE
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // Crea la caratteristica BLE con le proprietà di lettura, scrittura e notifica
-  pCharacteristic = pService->createCharacteristic(
-    CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pCharacteristic->setCallbacks(new MyCallbacks());
-
-  // Avvia il servizio
-  pService->start();
-
-  // Avvia la pubblicità (advertising)
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->start();
-  Serial.println("In attesa di connessione da un client...");
+  
+  // Inizializza il Bluetooth con il nome scelto
+  if (!SerialBT.begin("ESP32_BT")) {
+    Serial.println("Errore durante l'inizializzazione del Bluetooth");
+  } else {
+    Serial.println("Bluetooth inizializzato. In attesa di connessione...");
+  }
+  
+  // Registra il callback per gli eventi di connessione
+  SerialBT.register_callback(btCallback);
 }
 
-int counter = 0;
-
 void loop() {
-  if (deviceConnected) {
-    String message = R"({
-  "errors": [
-    {
-      "code": "01",
-      "message": "Sovraccarico motore"
-    },
-    {
-      "code": "02",
-      "message": "Pressione insufficiente"
-    },
-    {
-      "code": "03",
-      "message": "Temperatura elevata"
+  // Gestione dei dati ricevuti dal client Bluetooth
+  if (SerialBT.available()) {
+    String rxValue = SerialBT.readStringUntil('\n');
+    if (rxValue.length() > 0) {
+      Serial.print("Messaggio ricevuto: ");
+      Serial.println(rxValue);
+      // Risposta al client
+      SerialBT.println("{\"message\":\"ok\"}");
     }
-  ],
-  "parameters": [
-    {
-      "name": "Temperatura",
-      "value": "78.0"
-    },
-    {
-      "name": "Pressione",
-      "value": "2.4"
-    },
-    {
-      "name": "Tensione",
-      "value": "220.0"
-    },
-    {
-      "name": "Velocita",
-      "value": "1200.0"
-    }
-  ]
-})";
-    pCharacteristic->setValue(message.c_str());
-    pCharacteristic->notify();
-
-    Serial.print("n° ");
-    Serial.print(counter);
-    Serial.print(" Inviato: ");
-    Serial.println(message);
-
-    counter++;
-    delay(2000);
   }
+  
+  // Costruzione del JSON usando ArduinoJson
+  StaticJsonDocument<512> doc;
+  
+  // Array "errors"
+  JsonArray errors = doc.createNestedArray("errors");
+  JsonObject err1 = errors.createNestedObject();
+  err1["code"] = "01";
+  err1["message"] = "Sovraccarico motore";
+  JsonObject err2 = errors.createNestedObject();
+  err2["code"] = "02";
+  err2["message"] = "Pressione insufficiente";
+  JsonObject err3 = errors.createNestedObject();
+  err3["code"] = "03";
+  err3["message"] = "Temperatura elevata";
+  
+  // Array "parameters"
+  JsonArray parameters = doc.createNestedArray("parameters");
+  JsonObject param1 = parameters.createNestedObject();
+  param1["name"] = "Temperatura";
+  param1["value"] = "78.0";
+  JsonObject param2 = parameters.createNestedObject();
+  param2["name"] = "Pressione";
+  param2["value"] = "2.4";
+  JsonObject param3 = parameters.createNestedObject();
+  param3["name"] = "Tensione";
+  param3["value"] = "220.0";
+  JsonObject param4 = parameters.createNestedObject();
+  param4["name"] = "Velocita";
+  param4["value"] = "1200.0";
+  
+  // Serializza il JSON in una stringa
+  String output;
+  serializeJson(doc, output);
+  
+  // Invia il JSON tramite Bluetooth Serial
+  SerialBT.println(output);
+  
+  // Stampa il messaggio inviato sul monitor seriale
+  Serial.print("n° ");
+  Serial.print(counter);
+  Serial.print(" Inviato: ");
+  Serial.println(output);
+  
+  counter++;
+  delay(2000); // Invio ogni 2 secondi
 }

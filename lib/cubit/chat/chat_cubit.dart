@@ -1,45 +1,43 @@
+// chat_cubit.dart
 import 'dart:async';
-
 import 'package:ai_assistent_bluetooth/cubit/chat/chat_state.dart';
-import 'package:ai_assistent_bluetooth/models/chat_message.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:ai_assistent_bluetooth/models/chat_message.dart';
+import 'package:ai_assistent_bluetooth/services/chat_gpt_service.dart';
+
 
 class ChatCubit extends Cubit<ChatState> {
-  final BluetoothDevice _device;
-  BluetoothCharacteristic? _chatCharacteristic;
-  StreamSubscription? _notificationSubscription;
+  final ChatGptService chatGptService;
+  final String? errorCode;
+  final String errorMessage;
 
-  ChatCubit({required BluetoothDevice device})
-      : _device = device,
-        super(const ChatState(isConnecting: true, statusMessage: "Connecting...")) {
-    _connectAndDiscover();
+  ChatCubit({
+    required this.chatGptService,
+    this.errorCode,
+    required this.errorMessage,
+  }) : super(const ChatState(isWaitingForAi: true, statusMessage: "Thinking...")) {
+    _initChat();
   }
 
-  Future<void> _connectAndDiscover() async {
+  Future<void> _initChat() async {
+    // Costruiamo il prompt combinando codice e descrizione dell'errore
+    final prompt = _buildPrompt(errorCode, errorMessage);
     try {
-      await _device.connect();
+      final aiResponse = await chatGptService.getResponse(prompt);
+      addMessage(ChatMessage(message: aiResponse, isSentByUser: false));
     } catch (e) {
-      // Il dispositivo potrebbe già essere connesso
+      addMessage(ChatMessage(message: "Errore nel recupero della risposta: $e", isSentByUser: false));
+    } finally {
+      emit(state.copyWith(isWaitingForAi: false, statusMessage: "Ready"));
     }
-    emit(state.copyWith(isConnected: true, isConnecting: false, statusMessage: "Connected. Discovering services..."));
+  }
 
-    List<BluetoothService> services = await _device.discoverServices();
-    for (BluetoothService service in services) {
-      if (service.uuid.toString().toUpperCase().contains("FFE0")) {
-        for (BluetoothCharacteristic characteristic in service.characteristics) {
-          if (characteristic.uuid.toString().toUpperCase().contains("FFE1")) {
-            _chatCharacteristic = characteristic;
-            await _chatCharacteristic!.setNotifyValue(true);
-            _notificationSubscription = _chatCharacteristic!.onValueReceived.listen((value) {
-              String message = String.fromCharCodes(value);
-              addMessage(ChatMessage(message: message, isSentByUser: false));
-            });
-          }
-        }
-      }
+  String _buildPrompt(String? code, String message) {
+    if (code != null && code.isNotEmpty) {
+      return "Errore $code: $message. Fornisci istruzioni dettagliate su come risolvere questo errore.";
+    } else {
+      return "$message. Fornisci istruzioni dettagliate su come risolvere questo errore.";
     }
-    emit(state.copyWith(statusMessage: "Ready"));
   }
 
   void addMessage(ChatMessage message) {
@@ -48,26 +46,17 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   Future<void> sendMessage(String text) async {
-    if (_chatCharacteristic == null) return;
-    List<int> bytes = text.codeUnits;
+    // Aggiunge il messaggio dell'utente
+    addMessage(ChatMessage(message: text, isSentByUser: true));
+    // Mostra lo stato "thinking" in attesa della risposta AI
+    emit(state.copyWith(isWaitingForAi: true, statusMessage: "Thinking..."));
     try {
-      await _chatCharacteristic!.write(bytes);
-      addMessage(ChatMessage(message: text, isSentByUser: true));
+      final aiResponse = await chatGptService.getResponse(text);
+      addMessage(ChatMessage(message: aiResponse, isSentByUser: false));
     } catch (e) {
-      print("Errore nell'invio del messaggio: $e");
+      addMessage(ChatMessage(message: "Errore nel recupero della risposta: $e", isSentByUser: false));
+    } finally {
+      emit(state.copyWith(isWaitingForAi: false, statusMessage: "Ready"));
     }
-  }
-
-  Future<void> disconnect() async {
-    await _notificationSubscription?.cancel();
-    await _device.disconnect();
-    emit(state.copyWith(isConnected: false, statusMessage: "Disconnected"));
-  }
-
-  @override
-  Future<void> close() {
-    _notificationSubscription?.cancel();
-    _device.disconnect();
-    return super.close();
   }
 }

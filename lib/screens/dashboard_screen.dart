@@ -1,12 +1,14 @@
+import 'dart:developer';
+
 import 'package:ai_assistent_bluetooth/cubit/chat/chat_cubit.dart';
 import 'package:ai_assistent_bluetooth/screens/all_parameters_screen.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:ai_assistent_bluetooth/screens/chat_device_screen.dart';
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_cubit.dart';
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_state.dart';
-import 'package:ai_assistent_bluetooth/screens/chat_device_screen.dart';
+import 'package:ai_assistent_bluetooth/services/chat_gpt_service.dart';
 import 'package:ai_assistent_bluetooth/theme/style.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class DashboardView extends StatelessWidget {
   const DashboardView({super.key});
@@ -19,13 +21,12 @@ class DashboardView extends StatelessWidget {
         child: BlocConsumer<ScanCubit, ScanState>(
           listener: (context, state) {},
           builder: (context, state) {
-            if (state.isScanning == true || state.isConnecting) {
+            if (state.isScanning || state.isConnecting) {
               return _buildScanningState(state.statusMessage);
             }
             if (state.device != null) {
               return _buildConnectedState(context, state);
             }
-
             return _buildDisconnectedState(context);
           },
         ),
@@ -50,10 +51,9 @@ class DashboardView extends StatelessWidget {
   }
 
   Widget _buildConnectedState(BuildContext context, ScanState state) {
-    // Simulazione errori per scopi dimostrativi
-    final bool hasError = state.device?.platformName != null;
-    final String machineName = "CNC-3000";
-    final String machineId = "ID: M45872";
+    final bool hasError = state.errorList.isNotEmpty;
+    const String machineName = "CNC-3000";
+    const String machineId = "ID: M45872";
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -67,12 +67,9 @@ class DashboardView extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     machineName,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   Text(
                     machineId,
@@ -92,8 +89,7 @@ class DashboardView extends StatelessWidget {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),
-          _buildParametersGrid(),
-
+          _buildParametersGrid(state),
           const SizedBox(height: 24),
 
           // Pulsanti azione
@@ -125,15 +121,24 @@ class DashboardView extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     backgroundColor: hasError ? Colors.red : Colors.grey,
                   ),
-                  onPressed:
-                      hasError
-                          ? () => Navigator.push(
+                  onPressed: hasError
+                      ? () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const DeviceChatView(),
+                              builder: (context) => BlocProvider(
+                                create: (context) => ChatCubit(
+                                  chatGptService: ChatGptService(),
+                                  errorCode: state.errorList.last["code"] as String,
+                                  errorMessage: state.errorList.last["desc"] as String,
+                                ),
+                                child: DeviceChatView(
+                                  errorCode: state.errorList.last["code"] as String,
+                                  errorMessage: state.errorList.last["desc"] as String,
+                                ),
+                              ),
                             ),
                           )
-                          : null,
+                      : null,
                 ),
               ),
             ],
@@ -141,7 +146,7 @@ class DashboardView extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // Errori recenti
+          // Lista errori recenti
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -151,22 +156,20 @@ class DashboardView extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () {
-                  // Navigazione allo storico completo
+                  // Navigazione allo storico completo (da implementare)
                 },
                 child: const Text("Vedi tutti"),
               ),
             ],
           ),
-
-          Expanded(child: _buildErrorList(context, state.device!)),
+          Expanded(child: _buildErrorList(context, state.errorList)),
 
           // Pulsante disconnetti
           Center(
             child: TextButton.icon(
               icon: const Icon(Icons.link_off),
               label: const Text("Disconnetti"),
-              onPressed:
-                  () => context.read<ScanCubit>().disconnectFromAllDevices(),
+              onPressed: () => context.read<ScanCubit>().disconnectFromAllDevices(),
             ),
           ),
         ],
@@ -202,15 +205,12 @@ class DashboardView extends StatelessWidget {
     );
   }
 
-  Widget _buildParametersGrid() {
-    // Parametri di esempio per la visualizzazione
-    final parameters = [
-      {"name": "Temperatura", "value": "78°C", "icon": Icons.thermostat},
-      {"name": "Pressione", "value": "2.4 bar", "icon": Icons.speed},
-      {"name": "Tensione", "value": "220V", "icon": Icons.electrical_services},
-      {"name": "Velocità", "value": "1200 rpm", "icon": Icons.speed_outlined},
-    ];
-
+  Widget _buildParametersGrid(ScanState state) {
+    final parameters = state.parameters;
+    log(state.parameters.toString());
+    if (parameters.isEmpty) {
+      return const Center(child: Text("Nessun parametro disponibile"));
+    }
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -240,7 +240,6 @@ class DashboardView extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.start,
                 children: [
                   Icon(param["icon"] as IconData, color: Colors.blue[700]),
                   const SizedBox(width: 8),
@@ -254,11 +253,8 @@ class DashboardView extends StatelessWidget {
               Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  param["value"] as String,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  param["value"].toString(),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -268,24 +264,15 @@ class DashboardView extends StatelessWidget {
     );
   }
 
-  Widget _buildErrorList(BuildContext context, BluetoothDevice device) {
-    // Lista di errori di esempio
-    final errors = [
-      {"code": "E102", "desc": "Sovraccarico motore", "time": "Oggi, 14:32"},
-      {
-        "code": "E045",
-        "desc": "Pressione insufficiente",
-        "time": "Oggi, 10:15",
-      },
-      {"code": "E078", "desc": "Temperatura elevata", "time": "Ieri, 16:45"},
-    ];
-
+  Widget _buildErrorList(BuildContext context, List<Map<String, dynamic>> errorList) {
+    if (errorList.isEmpty) {
+      return const Center(child: Text("Nessun errore rilevato"));
+    }
     return ListView.separated(
-      shrinkWrap: true,
-      itemCount: errors.length,
+      itemCount: errorList.length,
       separatorBuilder: (context, index) => const Divider(),
       itemBuilder: (context, index) {
-        final error = errors[index];
+        final error = errorList[index];
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Container(
@@ -314,17 +301,22 @@ class DashboardView extends StatelessWidget {
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-          onTap:
-              () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder:
-                      (context) => BlocProvider(
-                        create: (context) => ChatCubit(device: device),
-                        child: const DeviceChatView(),
-                      ),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BlocProvider(
+                create: (context) => ChatCubit(
+                  chatGptService: ChatGptService(),
+                  errorCode: error["code"] as String,
+                  errorMessage: error["desc"] as String,
+                ),
+                child: DeviceChatView(
+                  errorCode: error["code"] as String,
+                  errorMessage: error["desc"] as String,
                 ),
               ),
+            ),
+          ),
         );
       },
     );
