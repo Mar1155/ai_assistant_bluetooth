@@ -72,11 +72,49 @@ int counter = 0;
 
 void loop() {
   if (deviceConnected) {
-    String message = "Messaggio #" + String(counter);
+    String message = R"({
+  "errors": [
+    {
+      "code": "01",
+      "message": "Sovraccarico motore"
+    },
+    {
+      "code": "02",
+      "message": "Pressione insufficiente"
+    },
+    {
+      "code": "03",
+      "message": "Temperatura elevata"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "Temperatura",
+      "value": "78.0"
+    },
+    {
+      "name": "Pressione",
+      "value": "2.4"
+    },
+    {
+      "name": "Tensione",
+      "value": "220.0"
+    },
+    {
+      "name": "Velocita",
+      "value": "1200.0"
+    }
+  ]
+})";
     pCharacteristic->setValue(message.c_str());
-    pCharacteristic->notify();  // Invia il messaggio attuale
-    Serial.println("Inviato: " + message);
+    pCharacteristic->notify();
+
+    Serial.print("n° ");
+    Serial.print(counter);
+    Serial.print(" Inviato: ");
+    Serial.println(message);
+
     counter++;
-    delay(2000);  // Invia ogni 2 secondi
+    delay(2000);
   }
 }

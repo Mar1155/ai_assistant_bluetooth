@@ -369,10 +369,10 @@ class _DeviceChatViewState extends State<DeviceChatView> {
             child: Column(
               children: [
                 _buildConnectionStatus(state.isConnected, state.isWaitingForAi),
-                // if(!state.isWaitingForAi)
-                // Expanded(child: _buildChatList(state.messages)),
-                // if(!state.isWaitingForAi)
-                // _buildMessageInput(context.read<ChatCubit>()),
+                if(!state.isWaitingForAi)      
+                Expanded(child: _buildChatList(state.messages)),
+                if(!state.isWaitingForAi)
+                _buildMessageInput(context.read<ChatCubit>()),
               ],
             ),
           ),
