@@ -2,9 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
-import '../utils/snackbar.dart';
+import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 
 class BluetoothOffScreen extends StatelessWidget {
   const BluetoothOffScreen({super.key, this.adapterState});
@@ -35,10 +33,10 @@ class BluetoothOffScreen extends StatelessWidget {
         onPressed: () async {
           try {
             if (!kIsWeb && Platform.isAndroid) {
-              await FlutterBluePlus.turnOn();
+               FlutterBlueClassic().turnOn();
             }
           } catch (e, backtrace) {
-            Snackbar.show(ABC.a, prettyException("Error Turning On:", e), success: false);
+            // Snackbar.show(ABC.a, prettyException("Error Turning On:", e), success: false);
             print("$e");
             print("backtrace: $backtrace");
           }
@@ -50,7 +48,6 @@ class BluetoothOffScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ScaffoldMessenger(
-      key: Snackbar.snackBarKeyA,
       child: Scaffold(
         backgroundColor: Colors.lightBlue,
         body: Center(

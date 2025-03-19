@@ -5,19 +5,18 @@ import 'dart:developer';
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_state.dart';
 import 'package:ai_assistent_bluetooth/localization/string_localization.dart';
 import 'package:ai_assistent_bluetooth/models/device_message.dart';
-import 'package:ai_assistent_bluetooth/utils/extra.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 
 class ScanCubit extends Cubit<ScanState> {
-  StreamSubscription<List<ScanResult>>? _scanResultsSubscription;
+  final FlutterBlueClassic _flutterBlueClassicPlugin = FlutterBlueClassic();
+
+  StreamSubscription? _scanResultsSubscription;
   Timer? _scanTimeoutTimer;
   StreamSubscription? _notificationSubscription;
 
   // Costanti configurabili
-  static const String _deviceName = "ESP32_BLE";
+  static const String _deviceName = "ESP32_BT";
   static const Duration _scanTimeout = Duration(seconds: 10);
   static const Duration _connectionTimeout = Duration(seconds: 8);
 
@@ -36,7 +35,7 @@ class ScanCubit extends Cubit<ScanState> {
     _setupScanResultsListener();
 
     try {
-      await FlutterBluePlus.startScan(timeout: _scanTimeout);
+      _flutterBlueClassicPlugin.startScan();
       log("Scansione completata");
       if (state.device == null && state.isScanning) {
         emit(
@@ -62,57 +61,41 @@ class ScanCubit extends Cubit<ScanState> {
   void _setupScanTimeoutTimer() {
     _scanTimeoutTimer = Timer(_scanTimeout, () {
       if (state.isScanning) {
-        FlutterBluePlus.stopScan();
+        _flutterBlueClassicPlugin.stopScan();
         if (state.device == null) {
-          emit(
-            const ScanState(
-              isScanning: false,
-              statusMessage: AppStrings.scanTimeoutMessage,
-              isConnected: false,
-            ),
-          );
+          emit(const ScanState(statusMessage: AppStrings.scanTimeoutMessage));
         }
       }
     });
   }
 
   void _setupScanResultsListener() {
-    _scanResultsSubscription = FlutterBluePlus.scanResults.listen(
-      (results) async {
-        log("${results.length} dispositivi trovati");
-        final targetDevice =
-            results
-                .where((result) => result.device.platformName == _deviceName)
-                .firstOrNull;
-
-        if (targetDevice != null) {
+    _scanResultsSubscription = _flutterBlueClassicPlugin.scanResults.listen(
+      (device) async {
+        log("Dispositivo ${device.name} == $_deviceName");
+        if (device.name == _deviceName) {
           emit(
             ScanState(
               isConnecting: true,
               statusMessage: AppStrings.connectingToDevice,
             ),
           );
-          await _connectToDevice(targetDevice);
+          await _connectToDevice(device);
         }
       },
       onError: (error) {
         log("Errore durante la scansione: $error");
-        emit(
-          ScanState(
-            isScanning: false,
-            statusMessage: "${AppStrings.scanError}: $error",
-          ),
-        );
+        emit(ScanState(statusMessage: "${AppStrings.scanError}: $error"));
       },
     );
   }
 
-  Future<void> _connectToDevice(ScanResult result) async {
-    await FlutterBluePlus.stopScan();
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    _flutterBlueClassicPlugin.stopScan();
     emit(
       ScanState(
         isScanning: false,
-        device: result.device,
+        device: device,
         statusMessage: AppStrings.connectingToDevice,
       ),
     );
@@ -125,7 +108,7 @@ class ScanCubit extends Cubit<ScanState> {
           emit(
             ScanState(
               isScanning: false,
-              device: result.device,
+              device: device,
               isConnected: false,
               statusMessage: AppStrings.connectionTimeout,
             ),
@@ -133,28 +116,17 @@ class ScanCubit extends Cubit<ScanState> {
         }
       });
 
-      await result.device.connectAndUpdateStream();
+      // Connessione tramite Bluetooth Classico
+      BluetoothConnection? connection = await _flutterBlueClassicPlugin.connect(
+        device.address,
+      );
       connectionCompleted = true;
 
-      // Dopo la connessione, avvia il discovery dei servizi e sottoscriviti alle notifiche
-      List<BluetoothService> services = await result.device.discoverServices();
-      for (BluetoothService service in services) {
-        if (service.uuid.toString().toUpperCase().contains("FFE0")) {
-          for (BluetoothCharacteristic characteristic
-              in service.characteristics) {
-            if (characteristic.uuid.toString().toUpperCase().contains("FFE1")) {
-              await characteristic.setNotifyValue(true);
-              _notificationSubscription = characteristic.onValueReceived.listen(
-                (value) {
-                  log(value.toString());
-                  final message = String.fromCharCodes(value);
-                  _processIncomingMessage(message);
-                },
-              );
-            }
-          }
-        }
-      }
+      // Sottoscrizione al flusso di dati in ingresso
+      _notificationSubscription = connection!.input!.listen((data) {
+        final message = String.fromCharCodes(data);
+        _processIncomingMessage(message);
+      });
 
       emit(
         state.copyWith(
@@ -168,7 +140,7 @@ class ScanCubit extends Cubit<ScanState> {
       emit(
         ScanState(
           isScanning: false,
-          device: result.device,
+          device: null,
           isConnected: false,
           statusMessage: errorMessage,
         ),
@@ -180,43 +152,19 @@ class ScanCubit extends Cubit<ScanState> {
   }
 
   void _processIncomingMessage(String message) {
-    log("Messaggio ricevuto: ${message}");
     try {
+      if (message.isEmpty) return;
       final jsonData = jsonDecode(message) as Map<String, dynamic>;
       final deviceData = DeviceData.fromJson(jsonData);
 
-      final updatedErrors = List<Map<String, dynamic>>.from(state.errorList);
-      for (final error in deviceData.errors) {
-        updatedErrors.add({
-          "code": error.code,
-          "desc": error.message,
-          "time": DateFormat('HH:mm').format(DateTime.now()),
-        });
-      }
-
-      final updatedParameters = List<Map<String, dynamic>>.from(
-        state.parameters,
-      );
-      for (final param in deviceData.parameters) {
-        final index = updatedParameters.indexWhere(
-          (p) => p["name"] == param.name,
-        );
-        if (index != -1) {
-          updatedParameters[index]["value"] = param.value;
-        } else {
-          updatedParameters.add({
-            "name": param.name,
-            "value": param.value,
-            "icon": Icons.settings,
-          });
-        }
-      }
-
+      final updatedErrors = deviceData.errors;
+      final updatedParameters = deviceData.parameters;
       emit(
         state.copyWith(errorList: updatedErrors, parameters: updatedParameters),
       );
     } on FormatException catch (e) {
       log("Errore nel parsing del messaggio JSON: $e");
+      log("text: ${message}");
     } catch (e) {
       log("Errore generico: $e");
     }
@@ -241,11 +189,15 @@ class ScanCubit extends Cubit<ScanState> {
     startScan();
   }
 
+  Future<void> disconnected() async {
+    emit(ScanState(device: null));
+  }
+
   Future<void> disconnectFromAllDevices() async {
     try {
-      List<BluetoothDevice> connectedDevices =
-          await FlutterBluePlus.connectedDevices;
-      if (connectedDevices.isEmpty) {
+      List<BluetoothDevice>? connectedDevices =
+          await _flutterBlueClassicPlugin.bondedDevices;
+      if (connectedDevices!.isEmpty) {
         emit(
           ScanState(
             isScanning: false,
@@ -257,11 +209,11 @@ class ScanCubit extends Cubit<ScanState> {
       }
       for (final device in connectedDevices) {
         try {
-          log("Disconnessione da ${device.platformName}...");
-          await device.disconnect();
-          log("Disconnesso da ${device.platformName}");
+          log("Disconnessione da ${device.name}...");
+          // await _flutterBlueClassicPlugin.disconnectAndUpdateStream();
+          log("Disconnesso da ${device.name}");
         } catch (e) {
-          log("Errore durante la disconnessione da ${device.platformName}: $e");
+          log("Errore durante la disconnessione da ${device.name}: $e");
         }
       }
       emit(
@@ -287,8 +239,8 @@ class ScanCubit extends Cubit<ScanState> {
     _scanTimeoutTimer = null;
     await _scanResultsSubscription?.cancel();
     _scanResultsSubscription = null;
-    if (FlutterBluePlus.isScanningNow) {
-      await FlutterBluePlus.stopScan();
+    if (await _flutterBlueClassicPlugin.isScanningNow) {
+      _flutterBlueClassicPlugin.stopScan();
     }
   }
 

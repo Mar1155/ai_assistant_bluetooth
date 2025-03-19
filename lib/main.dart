@@ -1,26 +1,19 @@
-// Copyright 2017-2023, Charles Weinberger & Paul DeMarco.
-// All rights reserved. Use of this source code is governed by a
-// BSD-style license that can be found in the LICENSE file.
-
 import 'dart:async';
+import 'dart:developer';
 
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_cubit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+// Import aggiornato per bluetooth classico
+import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 
 import 'screens/bluetooth_off_screen.dart';
 import 'screens/dashboard_screen.dart';
 
 void main() {
-  FlutterBluePlus.setLogLevel(LogLevel.verbose, color: true);
   runApp(const FlutterBlueApp());
 }
 
-//
-// This widget shows BluetoothOffScreen or
-// ScanScreen depending on the adapter state
-//
 class FlutterBlueApp extends StatefulWidget {
   const FlutterBlueApp({super.key});
 
@@ -36,11 +29,59 @@ class _FlutterBlueAppState extends State<FlutterBlueApp> {
   @override
   void initState() {
     super.initState();
-    _adapterStateStateSubscription = FlutterBluePlus.adapterState.listen((state) {
-      _adapterState = state;
+
+    checkBlueEnabled();
+    init(context);
+  }
+
+  void init(BuildContext context) {
+    // Ascolta il primo valore dallo stream e corregge lo stato se necessario
+    FlutterBlueClassic().adapterState.first
+        .then((state) {
+          log("Bluetooth stato iniziale: $state");
+          if (mounted) {
+            setState(() {
+              _adapterState = state;
+            });
+          }
+        })
+        .catchError((error) {
+          log("Errore nel recuperare lo stato iniziale: $error");
+        });
+
+    // Continua ad ascoltare gli aggiornamenti dello stato
+    _adapterStateStateSubscription = FlutterBlueClassic().adapterState.listen((
+      state,
+    ) {
+      log("Bluetooth adapter state aggiornato: $state");
       if (mounted) {
-        setState(() {});
+        setState(() {
+          _adapterState = state;
+        });
       }
+    });
+
+    FlutterBlueClassic().bondedDevices.then((devices) {
+      if (devices == null || devices.isEmpty) {
+        if (mounted) {
+          context.read<ScanCubit>().disconnected();
+        }
+        return;
+      }
+      devices.map((d) {
+        bool esp32Connected = devices.any(
+          (device) => device.name == "ESP32_BT",
+        );
+
+        log("Dispositivi connessi: ${devices.map((d) => d.name).join(', ')}");
+
+        if (!esp32Connected) {
+          log("ESP32_BT si è disconnesso!");
+          if (mounted) {
+            context.read<ScanCubit>().disconnected();
+          }
+        }
+      });
     });
   }
 
@@ -50,11 +91,18 @@ class _FlutterBlueAppState extends State<FlutterBlueApp> {
     super.dispose();
   }
 
+  Future<void> checkBlueEnabled() async {
+    _adapterState = await FlutterBlueClassic().adapterStateNow;
+    log("AdapterStateNow: $_adapterState");
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
-    Widget screen = _adapterState == BluetoothAdapterState.on
-        ? const DashboardView()
-        : BluetoothOffScreen(adapterState: _adapterState);
+    Widget screen =
+        _adapterState == BluetoothAdapterState.on
+            ? const DashboardView()
+            : BluetoothOffScreen(adapterState: _adapterState);
 
     return BlocProvider(
       create: (context) => ScanCubit(),
@@ -78,7 +126,9 @@ class BluetoothAdapterStateObserver extends NavigatorObserver {
     super.didPush(route, previousRoute);
     if (route.settings.name == '/DeviceScreen') {
       // Start listening to Bluetooth state changes when a new route is pushed
-      _adapterStateSubscription ??= FlutterBluePlus.adapterState.listen((state) {
+      _adapterStateSubscription ??= FlutterBlueClassic().adapterState.listen((
+        state,
+      ) {
         if (state != BluetoothAdapterState.on) {
           // Pop the current route if Bluetooth is off
           navigator?.pop();

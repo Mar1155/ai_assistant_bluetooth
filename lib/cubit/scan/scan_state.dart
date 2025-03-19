@@ -1,4 +1,5 @@
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:ai_assistent_bluetooth/models/device_message.dart';
+import 'package:flutter_blue_classic/flutter_blue_classic.dart';
 
 class ScanState {
   final bool isScanning;
@@ -6,8 +7,8 @@ class ScanState {
   final bool isConnected;
   final String statusMessage;
   final BluetoothDevice? device;
-  final List<Map<String, dynamic>> parameters;
-  final List<Map<String, dynamic>> errorList;
+  final List<ParameterData> parameters;
+  final List<ErrorData> errorList;
 
   const ScanState({
     this.isScanning = false,
@@ -25,8 +26,8 @@ class ScanState {
     bool? isConnected,
     String? statusMessage,
     BluetoothDevice? device,
-    List<Map<String, dynamic>>? parameters,
-    List<Map<String, dynamic>>? errorList,
+    List<ParameterData>? parameters,
+    List<ErrorData>? errorList,
   }) {
     return ScanState(
       isScanning: isScanning ?? this.isScanning,

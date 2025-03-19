@@ -28,6 +28,19 @@ void setup() {
   SerialBT.register_callback(btCallback);
 }
 
+float randomValue(const char* name) {
+  if (strcmp(name, "Temperatura") == 0) {
+    return random(0, 101) + random(0, 10) / 10.0; // 0-100.9 °C
+  } else if (strcmp(name, "Pressione") == 0) {
+    return random(1, 5) + random(0, 10) / 10.0; // 1.0-4.9 bar
+  } else if (strcmp(name, "Tensione") == 0) {
+    return random(210, 231) + random(0, 10) / 10.0; // 210.0-230.9 V
+  } else if (strcmp(name, "Velocita") == 0) {
+    return random(1000, 3001) + random(0, 10) / 10.0; // 1000.0-3000.9 rpm
+  }
+  return 0;
+}
+
 void loop() {
   // Gestione dei dati ricevuti dal client Bluetooth
   if (SerialBT.available()) {
@@ -55,20 +68,15 @@ void loop() {
   err3["code"] = "03";
   err3["message"] = "Temperatura elevata";
   
-  // Array "parameters"
+  // Array "parameters" con valori casuali
   JsonArray parameters = doc.createNestedArray("parameters");
-  JsonObject param1 = parameters.createNestedObject();
-  param1["name"] = "Temperatura";
-  param1["value"] = "78.0";
-  JsonObject param2 = parameters.createNestedObject();
-  param2["name"] = "Pressione";
-  param2["value"] = "2.4";
-  JsonObject param3 = parameters.createNestedObject();
-  param3["name"] = "Tensione";
-  param3["value"] = "220.0";
-  JsonObject param4 = parameters.createNestedObject();
-  param4["name"] = "Velocita";
-  param4["value"] = "1200.0";
+  const char* names[] = {"Temperatura", "Pressione", "Tensione", "Velocita"};
+  
+  for (int i = 0; i < 4; i++) {
+    JsonObject param = parameters.createNestedObject();
+    param["name"] = names[i];
+    param["value"] = randomValue(names[i]);
+  }
   
   // Serializza il JSON in una stringa
   String output;
@@ -84,5 +92,5 @@ void loop() {
   Serial.println(output);
   
   counter++;
-  delay(2000); // Invio ogni 2 secondi
+  delay(500); // Invio ogni 2 secondi
 }
