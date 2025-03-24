@@ -1,10 +1,10 @@
 // chat_cubit.dart
 import 'dart:async';
+import 'dart:developer';
 import 'package:ai_assistent_bluetooth/cubit/chat/chat_state.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_assistent_bluetooth/models/chat_message.dart';
 import 'package:ai_assistent_bluetooth/services/chat_gpt_service.dart';
-
 
 class ChatCubit extends Cubit<ChatState> {
   final ChatGptService chatGptService;
@@ -15,48 +15,67 @@ class ChatCubit extends Cubit<ChatState> {
     required this.chatGptService,
     this.errorCode,
     required this.errorMessage,
-  }) : super(const ChatState(isWaitingForAi: true, statusMessage: "Thinking...")) {
+  }) : super(
+         const ChatState(isWaitingForAi: true, statusMessage: "Thinking..."),
+       ) {
     _initChat();
   }
 
   Future<void> _initChat() async {
     // Costruiamo il prompt combinando codice e descrizione dell'errore
     final prompt = _buildPrompt(errorCode, errorMessage);
+    // Aggiungi il messaggio iniziale dell'utente alla cronologia
+    addMessage(ChatMessage(message: prompt, isSentByUser: true));
     try {
-      final aiResponse = await chatGptService.getResponse(prompt);
+      final aiResponse = await chatGptService.getResponse(state.messages);
       addMessage(ChatMessage(message: aiResponse, isSentByUser: false));
     } catch (e) {
-      addMessage(ChatMessage(message: "Errore nel recupero della risposta: $e", isSentByUser: false));
+      addMessage(
+        ChatMessage(
+          message: "Errore nel recupero della risposta: $e",
+          isSentByUser: false,
+        ),
+      );
     } finally {
       emit(state.copyWith(isWaitingForAi: false, statusMessage: "Ready"));
     }
   }
 
   String _buildPrompt(String? code, String message) {
+    log("codice errore: $code");
     if (code != null && code.isNotEmpty) {
-      return "Errore $code: $message. Fornisci istruzioni dettagliate su come risolvere questo errore.";
+      return code;
     } else {
       return "$message. Fornisci istruzioni dettagliate su come risolvere questo errore.";
     }
   }
 
   void addMessage(ChatMessage message) {
-    final updatedMessages = List<ChatMessage>.from(state.messages)..add(message);
+    final updatedMessages = List<ChatMessage>.from(state.messages)
+      ..add(message);
     emit(state.copyWith(messages: updatedMessages));
   }
 
   Future<void> sendMessage(String text) async {
     // Aggiunge il messaggio dell'utente
     addMessage(ChatMessage(message: text, isSentByUser: true));
-    // Mostra lo stato "thinking" in attesa della risposta AI
     emit(state.copyWith(isWaitingForAi: true, statusMessage: "Thinking..."));
     try {
-      final aiResponse = await chatGptService.getResponse(text);
+      final aiResponse = await chatGptService.getResponse(state.messages);
       addMessage(ChatMessage(message: aiResponse, isSentByUser: false));
     } catch (e) {
-      addMessage(ChatMessage(message: "Errore nel recupero della risposta: $e", isSentByUser: false));
+      addMessage(
+        ChatMessage(
+          message: "Errore nel recupero della risposta: $e",
+          isSentByUser: false,
+        ),
+      );
     } finally {
       emit(state.copyWith(isWaitingForAi: false, statusMessage: "Ready"));
     }
+  }
+
+  Future<void> resetChat() async {
+    emit(ChatState());
   }
 }
