@@ -10,14 +10,14 @@ import 'package:ai_assistent_bluetooth/models/chat_message.dart';
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_cubit.dart';
 import 'package:ai_assistent_bluetooth/cubit/scan/scan_state.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 class DeviceChatView extends StatefulWidget {
   final String? errorCode;
   final String errorMessage;
-  const DeviceChatView({Key? key, this.errorCode, required this.errorMessage})
-    : super(key: key);
+  const DeviceChatView({super.key, this.errorCode, required this.errorMessage});
 
   @override
   State<DeviceChatView> createState() => _DeviceChatViewState();
@@ -192,60 +192,88 @@ class _DeviceChatViewState extends State<DeviceChatView> {
         final msg = chatMessages[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: Row(
-            mainAxisAlignment:
-                msg.isSentByUser
-                    ? MainAxisAlignment.end
-                    : MainAxisAlignment.start,
+          child: Column(
             children: [
-              if (!msg.isSentByUser)
-                const CircleAvatar(
-                  radius: 16,
-                  backgroundColor: Colors.blue,
-                  child: Icon(Icons.android, size: 16, color: Colors.white),
-                ),
-              if (!msg.isSentByUser) const SizedBox(width: 8),
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color:
-                        msg.isSentByUser
-                            ? Theme.of(context).primaryColor
-                            : Colors.grey[200],
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Stack(
-                    children: [
-                      Text(
-                        msg.message,
-                        style: TextStyle(
-                          color: msg.isSentByUser ? Colors.white : Colors.black,
-                          fontSize: 16,
-                        ),
+              Row(
+                mainAxisAlignment:
+                    msg.isSentByUser
+                        ? MainAxisAlignment.end
+                        : MainAxisAlignment.start,
+                children: [
+                  if (!msg.isSentByUser)
+                    const CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.android, size: 16, color: Colors.white),
+                    ),
+                  if (!msg.isSentByUser) const SizedBox(width: 8),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
                       ),
-                      if (!msg.isSentByUser)
-                        Positioned(
-                          right: 0,
-                          bottom: -8,
-                          child: IconButton(
-                            iconSize: 18,
-                            icon: Icon(
-                              _isSpeaking
-                                  ? Icons.pause_circle
-                                  : Icons.play_circle,
-                              color: Colors.blue,
+                      decoration: BoxDecoration(
+                        color:
+                            msg.isSentByUser
+                                ? Theme.of(context).primaryColor
+                                : Colors.grey[200],
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Stack(
+                        children: [
+                          Text(
+                            msg.message,
+                            style: TextStyle(
+                              color:
+                                  msg.isSentByUser
+                                      ? Colors.white
+                                      : Colors.black,
+                              fontSize: 16,
                             ),
-                            onPressed: _toggleTts,
+                          ),
+                          if (!msg.isSentByUser)
+                            Positioned(
+                              right: 0,
+                              bottom: -8,
+                              child: IconButton(
+                                iconSize: 18,
+                                icon: Icon(
+                                  _isSpeaking
+                                      ? Icons.pause_circle
+                                      : Icons.play_circle,
+                                  color: Colors.blue,
+                                ),
+                                onPressed: _toggleTts,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          // Naviga verso la schermata dell'immagine passando il percorso dell'immagine
+                          context.push('/chat/image', extra: widget.errorCode);
+                        },
+                        child: const Text(
+                          "mostra immagine per il dettaglio",
+                          style: TextStyle(
+                            decoration: TextDecoration.underline,
+                            color: Colors.blue,
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),
-              ),
             ],
           ),
         );

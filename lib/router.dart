@@ -3,6 +3,7 @@ import 'package:ai_assistent_bluetooth/screens/all_parameters_screen.dart';
 import 'package:ai_assistent_bluetooth/screens/auth/login_screen.dart';
 import 'package:ai_assistent_bluetooth/screens/chat_device_screen.dart';
 import 'package:ai_assistent_bluetooth/screens/dashboard_screen.dart';
+import 'package:ai_assistent_bluetooth/screens/show_image_screen.dart';
 import 'package:ai_assistent_bluetooth/services/chat_gpt_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -39,11 +40,17 @@ final GoRouter router = GoRouter(
           ),
         );
       },
+      routes: [
+        GoRoute(
+          path: '/image',
+          builder: (context, state) {
+            final imagePath = state.extra as String? ?? '';
+            return ShowImageScreen(imagePath: imagePath);
+          },
+        ),
+      ],
     ),
-    GoRoute(
-      path: '/user',
-      builder: (context, state) => const UserHomeView(),
-    ),
+    GoRoute(path: '/user', builder: (context, state) => const UserHomeView()),
   ],
   redirect: (context, state) {
     // final isAuthenticated = AuthService().isLoggedIn();
